@@ -353,7 +353,7 @@ struct OrtApi {
      * Add custom ops to the OrtCustomOpDomain
      *  Note: The OrtCustomOp* pointer must remain valid until the OrtCustomOpDomain using it is released
     */
-  ORT_API2_STATUS(CustomOpDomain_Add, _Inout_ OrtCustomOpDomain* custom_op_domain, _In_ OrtCustomOp* op);
+  ORT_API2_STATUS(CustomOpDomain_Add, _Inout_ OrtCustomOpDomain* custom_op_domain, _In_ OrtCustomOp const* op);
 
   /*
      * Add a custom op domain to the OrtSessionOptions

@@ -42,12 +42,15 @@ struct Exception : std::exception {
 template <typename T>
 struct Global {
   static const OrtApi& api_;
+  static const OrtApi& get_default_stub() {
+    static OrtApi stub_api;
+    return stub_api;
+  }
 };
 
 #ifdef EXCLUDE_REFERENCE_TO_ORT_DLL
-OrtApi stub_api;
 template <typename T>
-const OrtApi& Global<T>::api_ = stub_api;
+const OrtApi& Global<T>::api_ = Global<T>::get_default_stub();
 #else
 template <typename T>
 const OrtApi& Global<T>::api_ = *OrtGetApiBase()->GetApi(ORT_API_VERSION);
