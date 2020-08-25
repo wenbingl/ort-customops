@@ -3,6 +3,7 @@
 # license information.
 ###############################################################################
 
+import numpy as np
 from pathlib import Path
 from ._ortcustomops import (PyCustomOpDef, add_custom_op)
 
@@ -54,14 +55,15 @@ class Opdef:
         return self.body(*args, **kwargs)
 
 
-def _on_pyop_invocation(id, feed):
-    fetch = []
+def _on_pyop_invocation(k_id, feed):
     for op_ in OpdefList.odlist:
-        if op_._nativedef.obj_id == id:
-            return op_.body(*feed)
+        if op_._nativedef.obj_id == k_id:
+            rv = op_.body(*feed)
+            return k_id, rv.shape, rv.flatten().tolist()
 
-    PyCustomOpDef.unlock()
-    return fetch
+    # return a dummy result.
+    fetch = np.ones([1, 1], np.float32)
+    return k_id, fetch.shape, fetch.flatten().tolist()
 
 
-PyCustomOpDef.op_invoker = _on_pyop_invocation
+PyCustomOpDef.install_hooker(_on_pyop_invocation)

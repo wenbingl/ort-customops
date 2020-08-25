@@ -7,6 +7,13 @@
 #include <vector>
 #include <cmath>
 
+struct OrtTensorDimensions : std::vector<int64_t> {
+  OrtTensorDimensions(Ort::CustomOpApi& ort, const OrtValue* value) {
+    OrtTensorTypeAndShapeInfo* info = ort.GetTensorTypeAndShape(value);
+    std::vector<int64_t>::operator=(ort.GetTensorShape(info));
+    ort.ReleaseTensorTypeAndShapeInfo(info);
+  }
+};
 
 struct KernelOne {
   KernelOne(OrtApi api)
@@ -109,15 +116,25 @@ OrtStatus* ORT_API_CALL RegisterCustomOps(OrtSessionOptions* options, const OrtA
   OrtCustomOpDomain* domain = nullptr;
   const OrtApi* ortApi = api->GetApi(ORT_API_VERSION);
 
+  if (auto status = ortApi->CreateCustomOpDomain("test.customop", &domain)) {
+    return status;
+  }
+  else {
+    if (auto status = ortApi->CustomOpDomain_Add(domain, &c_CustomOpOne)) {
+      return status;
+    }
+
+    if (auto status = ortApi->CustomOpDomain_Add(domain, &c_CustomOpTwo)) {
+      return status;
+    }
+
+    if (auto status = ortApi->AddCustomOpDomain(options, domain)) {
+      return status;
+    }
+  }
+
+  domain = nullptr;
   if (auto status = ortApi->CreateCustomOpDomain(c_OpDomain, &domain)) {
-    return status;
-  }
-
-  if (auto status = ortApi->CustomOpDomain_Add(domain, &c_CustomOpOne)) {
-    return status;
-  }
-
-  if (auto status = ortApi->CustomOpDomain_Add(domain, &c_CustomOpTwo)) {
     return status;
   }
 

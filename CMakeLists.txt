@@ -16,6 +16,16 @@ include(CheckLanguage)
 
 set(CMAKE_CXX_STANDARD 14)
 
+option(CC_OPTIMIZE "Allow compiler optimizations.  Set to OFF to disable" OFF)
+
+if(NOT CC_OPTIMIZE)
+    string(REGEX REPLACE "(\-O[011123456789])" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "(\-O[011123456789])" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0")
+endif()
+
 set(CMAKE_FIND_FRAMEWORK NEVER CACHE STRING "...")
 if(NOT "${CMAKE_FIND_FRAMEWORK}" STREQUAL "NEVER")
   message(FATAL_ERROR "CMAKE_FIND_FRAMEWORK is not NEVER")

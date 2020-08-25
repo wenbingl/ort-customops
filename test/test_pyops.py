@@ -13,8 +13,8 @@ def _create_test_model():
                                   ['identity1'], ['reversed'],
                                   domain='ai.onnx.contrib')]
 
-    input0 = helper.make_tensor_value_info('input_1', onnx_proto.TensorProto.FLOAT, [2, 3])
-    output0 = helper.make_tensor_value_info('reversed', onnx_proto.TensorProto.FLOAT, [2, 3])
+    input0 = helper.make_tensor_value_info('input_1', onnx_proto.TensorProto.FLOAT, [None, 2])
+    output0 = helper.make_tensor_value_info('reversed', onnx_proto.TensorProto.FLOAT, [None, 2])
 
     graph = helper.make_graph(nodes, 'test0', [input0], [output0])
     model = helper.make_model(graph, opset_imports=[helper.make_operatorsetid('ai.onnx.contrib', 1)])
@@ -24,15 +24,22 @@ def _create_test_model():
 @onnx_op(op_type="ReverseMatrix")
 def reverse_matrix(x):
     # the user custom op implementation here:
-    return np.flip(x, axis=1)
+    return np.flip(x, axis=0)
 
 
 so = _ort.SessionOptions()
 so.register_custom_ops_library(_get_library_path())
 
+sess0 = _ort.InferenceSession('./test/data/custom_op_test.onnx', so)
+
+res = sess0.run(None,
+    {'input_1': np.random.rand(3, 5).astype(np.float32), 'input_2': np.random.rand(3, 5).astype(np.float32)})
+
+print(res[0])
+
 sess = _ort.InferenceSession(_create_test_model().SerializeToString(), so)
 
-txout = sess.run(None, {'input_1':
-                            np.array([1, 2, 3, 4, 5, 6]).astype(np.float32).reshape([2, 3])})
+txout = sess.run(None,
+    {'input_1': np.array([1, 2, 3, 4, 5, 6]).astype(np.float32).reshape([3, 2])})
 
 print(txout[0])

@@ -20,32 +20,30 @@
 
 namespace py = pybind11;
 
-const std::map<int, int>& PyCustomOpDef::get_numpy_type_map(bool from_or_to){
-  static std::map<int, int> from_type_map{
-    {dt_bool, NPY_BOOL},
-    {dt_float, NPY_FLOAT},
-    {dt_float16, NPY_FLOAT16},
-    {dt_double, NPY_DOUBLE},
-    {dt_int8, NPY_INT8},
-    {dt_uint8, NPY_UINT8},
-    {dt_int16, NPY_INT16},
-    {dt_uint16, NPY_UINT16},
-    {dt_int32, NPY_INT},
-    {dt_uint32, NPY_UINT},
-    {dt_int64, NPY_LONGLONG},
-    {dt_uint64, NPY_ULONGLONG},
+const std::map<int, int>& PyCustomOpDef::get_numpy_type_map(bool from_or_to) {
+  static std::map<int, int> to_type_map{
+      {dt_bool, NPY_BOOL},
+      {dt_float, NPY_FLOAT},
+      {dt_float16, NPY_FLOAT16},
+      {dt_double, NPY_DOUBLE},
+      {dt_int8, NPY_INT8},
+      {dt_uint8, NPY_UINT8},
+      {dt_int16, NPY_INT16},
+      {dt_uint16, NPY_UINT16},
+      {dt_int32, NPY_INT},
+      {dt_uint32, NPY_UINT},
+      {dt_int64, NPY_LONGLONG},
+      {dt_uint64, NPY_ULONGLONG},
   };
 
-  static auto to_type_map = []{std::map<int, int> reversed;
-                          for(auto it:from_type_map) reversed[it.second] = it.first; return reversed;}();
+  static auto from_type_map = [] {std::map<int, int> reversed;
+                          for(auto it:to_type_map) reversed[it.second] = it.first; return reversed; }();
 
-  return from_or_to? from_type_map: to_type_map;
+  return from_or_to ? from_type_map : to_type_map;
 }
 
-
-struct PyCustomOpDefImpl: public PyCustomOpDef{
-
-  static int to_numpy(int dt, bool from_or_to=false) {
+struct PyCustomOpDefImpl : public PyCustomOpDef {
+  static int to_numpy(int dt, bool from_or_to = false) {
     auto type_map = get_numpy_type_map(from_or_to);
     const auto it = type_map.find(dt);
     if (it == type_map.end()) {
@@ -56,30 +54,45 @@ struct PyCustomOpDefImpl: public PyCustomOpDef{
   }
 
   typedef std::vector<int64_t> shape_t;
+  static int64_t calc_size_from_shape(const shape_t& sp) {
+    size_t c = 1;
+    for (auto it = sp.begin(); it != sp.end(); ++it) {
+      c *= *it;
+    }
+    return c;
+  }
 
   static int from_numpy(int dt) {
     return to_numpy(dt, true);
   }
 
   template <typename _DT>
-  static py::object GetPyObjFromTensor(const _DT* p, const shape_t& shape) {
+  static py::object BuildPyObjFromTensor(const _DT* p, const shape_t& shape) {
     std::vector<npy_intp> npy_dims;
-    for (auto n: shape) {
+    for (auto n : shape) {
       npy_dims.push_back(n);
     }
 
     const int numpy_type = to_numpy(dt_float);
-    obj = py::reinterpret_steal<py::object>(PyArray_SimpleNew(
+    auto obj = py::reinterpret_borrow<py::object>(PyArray_SimpleNew(
         static_cast<int>(shape.size()), npy_dims.data(), numpy_type));
 
+    void* outPtr = static_cast<void*>(
+        PyArray_DATA(reinterpret_cast<PyArrayObject*>(obj.ptr())));
+
+    memcpy(outPtr, p, sizeof(_DT) * calc_size_from_shape(shape));
     return obj;
   }
 
-  using callback_t = std::function<py::object(uint64_t id, py::object)>;
-  static callback_t op_invoker;
+  static py::object InvokePyFunction(uint64_t id, const py::object& feed) {
+    return (*op_invoker)(id, feed);
+  }
+
+  using callback_t = std::function<py::object(uint64_t id, const py::object&)>;
+  static std::auto_ptr<callback_t> op_invoker;
 };
 
-PyCustomOpDefImpl::callback_t PyCustomOpDefImpl::op_invoker;
+std::auto_ptr<PyCustomOpDefImpl::callback_t> PyCustomOpDefImpl::op_invoker;
 // static py::function g_pyfunc_caller;
 // static std::mutex op_mutex;
 // static std::condition_variable op_cv;
@@ -101,8 +114,8 @@ void PyCustomOpKernel::Compute(OrtKernelContext* context) {
   dimensions = (ort_.GetTensorShape(info));
   ort_.ReleaseTensorTypeAndShapeInfo(info);
 
-  py::object input0;
-  PyCustomOpDefImpl::GetPyObjFromTensor(X, dimensions, input0);
+  /* Acquire GIL before calling Python code, due to it was released in sess.run */
+  py::gil_scoped_acquire acquire;
 
   // TODO: Direct-Buffer-Access doesn't work for some reason.
   // OrtTensorTypeAndShapeInfo* output_info = ort_.GetTensorTypeAndShape(output);
@@ -118,33 +131,42 @@ void PyCustomOpKernel::Compute(OrtKernelContext* context) {
   //      sizeof(float)});
 
   {
-    /* Acquire GIL before calling Python code */
-    py::gil_scoped_acquire acquire;
+    py::object input0 = PyCustomOpDefImpl::BuildPyObjFromTensor(X, dimensions);
     auto feed = py::make_tuple(input0);
-    auto fetch = PyCustomOpDefImpl::op_invoker(obj_id_, feed);
+    py::tuple fetch = PyCustomOpDefImpl::InvokePyFunction(obj_id_, feed);
+    int64_t rid = fetch[0].cast<int64_t>();
+    assert(rid == obj_id_);
+    auto dims = fetch[1].cast<std::vector<int64_t>>();
+    auto retval = fetch[2].cast<std::vector<float>>();
 
-    PyArrayObject* darray = reinterpret_cast<PyArrayObject*>(fetch.ptr());
-    std::vector<int64_t> dims;
-    const int npy_type = PyArray_TYPE(darray);
-    {
-        int ndim = PyArray_NDIM(darray);
-        const npy_intp* npy_dims = PyArray_DIMS(darray);
-        dims.resize(ndim);
-        for (int i = 0; i < ndim; ++i) {
-          dims[i] = npy_dims[i];
-        }
-    }
-
-    auto element_type = PyCustomOpDefImpl::from_numpy(npy_type);
-    OrtValue* output = ort_.KernelContext_GetOutput(context, 0, dims.data(), dimensions.size());
+    py::gil_scoped_release release;
+    OrtValue* output = ort_.KernelContext_GetOutput(context, 0, dims.data(), dims.size());
     float* out = ort_.GetTensorMutableData<float>(output);
+    std::copy(retval.data(), retval.data()+retval.size(), out);
+    // py::gil_scoped_acquire acquire;
 
-    //TODO: A better way to calc the size of a Tensor?
-    memcpy(output, PyArray_DATA(darray), sizeof(float) * [&dims](){
-      size_t c=1; for (auto it = dims.begin(); it != dims.end(); ++it) c *= *it; return c;}());
+    // int64_t rid = fetch[0].cast<int64_t>();
+    // assert(rid == obj_id_);
+    // size_t ntp = fetch.size() - 1;
+    // py::object ret_val = fetch[ntp];
+    // auto p2 = PyArray_FROM_O(ret_val.ptr());
+    // PyArrayObject* darray = reinterpret_cast<PyArrayObject*>(p2);
+    // std::vector<int64_t> dims;
+    // const int npy_type = PyArray_TYPE(darray);
+    // {
+    //   int ndim = PyArray_NDIM(darray);
+    //   const npy_intp* npy_dims = PyArray_DIMS(darray);
+    //   dims.resize(ndim);
+    //   std::copy(npy_dims, npy_dims+ndim, dims.begin());
+    // }
+
+    // auto element_type = PyCustomOpDefImpl::from_numpy(npy_type);
+    // OrtValue* output = ort_.KernelContext_GetOutput(context, 0, dims.data(), dims.size());
+    // float* out = ort_.GetTensorMutableData<float>(output);
+    // const void* pyOut = PyData(darray, dd);
+
+    // memcpy(out, pyOut, PyArray_NBYTES((PyArrayObject*)NULL));
   }
-
-  // py::gil_scoped_release release;
 }
 
 const OrtCustomOp* FetchPyCustomOps(size_t& count) {
@@ -159,7 +181,6 @@ const OrtCustomOp* FetchPyCustomOps(size_t& count) {
   return c_pycustomops.data();
 }
 
-
 // static std::ofstream logger;
 static int init_numpy() {
   import_array();
@@ -170,7 +191,7 @@ static int init_numpy() {
 
 void AddGlobalMethods(pybind11::module& m) {
   // m.def("hook_pyfunc_caller", hook_func); // [](pybind11::function func) {
-     // g_pyfunc_caller = func; });
+  // g_pyfunc_caller = func; });
   m.def("add_custom_op", [](const PyCustomOpDef& cod) { PyCustomOpDef::FullList().push_back(&cod); });
 }
 
@@ -181,8 +202,9 @@ void AddObjectMethods(pybind11::module& m) {
       .def_readwrite("obj_id", &PyCustomOpDef::obj_id)
       .def_readwrite("input_types", &PyCustomOpDef::input_types)
       .def_readwrite("output_types", &PyCustomOpDef::output_types)
-      .def_static("unlock", [](){}, py::call_guard<py::gil_scoped_release>())
-      .def_readwrite_static("op_invoker", &PyCustomOpDefImpl::op_invoker)
+      .def_static("install_hooker", [](py::object obj) {
+        std::auto_ptr<PyCustomOpDefImpl::callback_t> s_obj(new PyCustomOpDefImpl::callback_t(obj));
+        PyCustomOpDefImpl::op_invoker = s_obj; })
       .def_readonly_static("dt_float", &PyCustomOpDef::dt_float);
 }
 
