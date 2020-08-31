@@ -42,6 +42,7 @@ class Opdef:
         opdef._nativedef.op_type = op_type
         opdef._nativedef.obj_id = od_id
 
+        # TODO: add handle more types and multiple inputs/outputs.
         # by default the op is single in/out
         if kwargs.get('inputs', None) is None:
             opdef._nativedef.input_types = [PyCustomOpDef.dt_float]
@@ -61,9 +62,10 @@ def _on_pyop_invocation(k_id, feed):
             rv = op_.body(*feed)
             return k_id, rv.shape, rv.flatten().tolist()
 
-    # return a dummy result.
+    # return a dummy result if there is no function found,
+    # an exception should be raised in C++ custom op implementation.
     fetch = np.ones([1, 1], np.float32)
-    return k_id, fetch.shape, fetch.flatten().tolist()
+    return 0, fetch.shape, fetch.flatten().tolist()
 
 
 PyCustomOpDef.install_hooker(_on_pyop_invocation)

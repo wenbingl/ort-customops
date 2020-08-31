@@ -27,19 +27,20 @@ def reverse_matrix(x):
     return np.flip(x, axis=0)
 
 
+# TODO: refactor the following code into pytest cases, right now, the script is more friendly for debugging.
 so = _ort.SessionOptions()
 so.register_custom_ops_library(_get_library_path())
 
 sess0 = _ort.InferenceSession('./test/data/custom_op_test.onnx', so)
 
-res = sess0.run(None,
-    {'input_1': np.random.rand(3, 5).astype(np.float32), 'input_2': np.random.rand(3, 5).astype(np.float32)})
+res = sess0.run(None, {
+    'input_1': np.random.rand(3, 5).astype(np.float32), 'input_2': np.random.rand(3, 5).astype(np.float32)})
 
 print(res[0])
 
 sess = _ort.InferenceSession(_create_test_model().SerializeToString(), so)
 
-txout = sess.run(None,
-    {'input_1': np.array([1, 2, 3, 4, 5, 6]).astype(np.float32).reshape([3, 2])})
+txout = sess.run(None, {
+    'input_1': np.array([1, 2, 3, 4, 5, 6]).astype(np.float32).reshape([3, 2])})
 
 print(txout[0])

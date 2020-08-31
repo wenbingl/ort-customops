@@ -42,6 +42,18 @@ const std::map<int, int>& PyCustomOpDef::get_numpy_type_map(bool from_or_to) {
   return from_or_to ? from_type_map : to_type_map;
 }
 
+template <typename _DT>
+static _DT _to_template(int dt){
+  switch (dt) {
+    case dt_bool: return bool();
+    case dt_float: return float();
+  }
+
+  // default case
+  assert("Unknown data type!");
+  return 0;
+}
+
 struct PyCustomOpDefImpl : public PyCustomOpDef {
   static int to_numpy(int dt, bool from_or_to = false) {
     auto type_map = get_numpy_type_map(from_or_to);
@@ -143,8 +155,9 @@ void PyCustomOpKernel::Compute(OrtKernelContext* context) {
     OrtValue* output = ort_.KernelContext_GetOutput(context, 0, dims.data(), dims.size());
     float* out = ort_.GetTensorMutableData<float>(output);
     std::copy(retval.data(), retval.data()+retval.size(), out);
-    // py::gil_scoped_acquire acquire;
 
+    // TODO: the return value from the python callback function doesn't work in pybind11&numpy.
+    // py::gil_scoped_acquire acquire;
     // int64_t rid = fetch[0].cast<int64_t>();
     // assert(rid == obj_id_);
     // size_t ntp = fetch.size() - 1;
@@ -190,8 +203,6 @@ static int init_numpy() {
 }
 
 void AddGlobalMethods(pybind11::module& m) {
-  // m.def("hook_pyfunc_caller", hook_func); // [](pybind11::function func) {
-  // g_pyfunc_caller = func; });
   m.def("add_custom_op", [](const PyCustomOpDef& cod) { PyCustomOpDef::FullList().push_back(&cod); });
 }
 
@@ -205,12 +216,28 @@ void AddObjectMethods(pybind11::module& m) {
       .def_static("install_hooker", [](py::object obj) {
         std::auto_ptr<PyCustomOpDefImpl::callback_t> s_obj(new PyCustomOpDefImpl::callback_t(obj));
         PyCustomOpDefImpl::op_invoker = s_obj; })
-      .def_readonly_static("dt_float", &PyCustomOpDef::dt_float);
+      .def_readonly_static("undefined", &PyCustomOpDef::undefined)
+      .def_readonly_static("dt_float", &PyCustomOpDef::dt_float)
+      .def_readonly_static("dt_uint8", &PyCustomOpDef::dt_uint8)
+      .def_readonly_static("dt_int8", &PyCustomOpDef::dt_int8)
+      .def_readonly_static("dt_uint16", &PyCustomOpDef::dt_uint16)
+      .def_readonly_static("dt_int16", &PyCustomOpDef::dt_int16)
+      .def_readonly_static("dt_int32", &PyCustomOpDef::dt_int32)
+      .def_readonly_static("dt_int64", &PyCustomOpDef::dt_int64)
+      .def_readonly_static("dt_string", &PyCustomOpDef::dt_string)
+      .def_readonly_static("dt_bool", &PyCustomOpDef::dt_bool)
+      .def_readonly_static("dt_float16", &PyCustomOpDef::dt_float16)
+      .def_readonly_static("dt_double", &PyCustomOpDef::dt_double)
+      .def_readonly_static("dt_uint32", &PyCustomOpDef::dt_uint32)
+      .def_readonly_static("dt_uint64", &PyCustomOpDef::dt_uint64)
+      .def_readonly_static("dt_complex64", &PyCustomOpDef::dt_complex64)
+      .def_readonly_static("dt_complex128", &PyCustomOpDef::dt_complex128)
+      .def_readonly_static("dt_bfloat16 =", &PyCustomOpDef::dt_bfloat16);
 }
 
 PYBIND11_MODULE(_ortcustomops, m) {
   m.doc() = "pybind11 stateful interface to ORT Custom Ops library";
-  //RegisterExceptions(m);
+  //TODO: RegisterExceptions(m);
 
   init_numpy();
   AddGlobalMethods(m);
