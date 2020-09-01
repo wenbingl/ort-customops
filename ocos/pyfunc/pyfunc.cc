@@ -42,18 +42,6 @@ const std::map<int, int>& PyCustomOpDef::get_numpy_type_map(bool from_or_to) {
   return from_or_to ? from_type_map : to_type_map;
 }
 
-template <typename _DT>
-static _DT _to_template(int dt){
-  switch (dt) {
-    case dt_bool: return bool();
-    case dt_float: return float();
-  }
-
-  // default case
-  assert("Unknown data type!");
-  return 0;
-}
-
 struct PyCustomOpDefImpl : public PyCustomOpDef {
   static int to_numpy(int dt, bool from_or_to = false) {
     auto type_map = get_numpy_type_map(from_or_to);
